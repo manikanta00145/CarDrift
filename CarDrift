@@ -18,6 +18,7 @@ WHITE = (255, 255, 255)
 YELLOW = (255, 255, 0)
 RED = (255, 0, 0)
 BLUE = (0, 0, 255)
+ORANGE = (255, 165, 0)
 
 # Setup Display
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
@@ -92,7 +93,7 @@ class Car:
         forward_x = math.sin(rad_angle)
         forward_y = -math.cos(rad_angle)
 
-        # Drifting mechanics: Interpolate current velocity towards forward facing
+        # Drifting mechanics
         target_vel_x = forward_x * self.speed
         target_vel_y = forward_y * self.speed
 
@@ -116,41 +117,65 @@ class Car:
         if self.y < 0: self.y = HEIGHT
 
     def draw(self, surface):
-        # Add police flashing lights
         if not self.is_player:
             light_color = RED if (pygame.time.get_ticks() % 400 < 200) else BLUE
             pygame.draw.rect(self.original_image, light_color, (2, 5, self.width - 4, 4))
 
-        # Rotate the car image
-        # Pygame rotates counter-clockwise for positive angles, so we use -self.angle
         rotated_image = pygame.transform.rotate(self.original_image, -self.angle)
-        
-        # Get new rect to keep the rotation centered
         new_rect = rotated_image.get_rect(center=(self.x, self.y))
         surface.blit(rotated_image, new_rect.topleft)
 
+# Visual Effect for destroyed police cars
+class Explosion:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.radius = 5
+        self.max_radius = 50
+        self.life = 255  # Alpha value for fading out
+
+    def update(self):
+        self.radius += 3
+        self.life -= 15
+
+    def draw(self, surface):
+        if self.life > 0:
+            # Create a transparent surface for the explosion circle
+            s = pygame.Surface((self.max_radius * 2, self.max_radius * 2), pygame.SRCALPHA)
+            pygame.draw.circle(s, (*ORANGE, max(0, self.life)), (self.max_radius, self.max_radius), self.radius)
+            surface.blit(s, (self.x - self.max_radius, self.y - self.max_radius))
+
 def check_collision(car1, car2):
-    # Distance between centers
     dx = car1.x - car2.x
     dy = car1.y - car2.y
     distance = math.hypot(dx, dy)
-    # If distance is less than roughly the car's diagonal size, it's a hit
     return distance < (car1.width / 2 + car2.width / 2 + 10)
 
 def main():
-    # Game Variables
     player = Car(WIDTH // 2, HEIGHT // 2, PLAYER_COLOR, is_player=True)
     police_cars = []
+    explosions = []
+    
+    # Stage & Score Variables
     score = 0
+    stage = 1
+    cars_spawned_this_stage = 0
     game_over = False
 
-    # Spawn Timer setup
+    # Timers
     SPAWN_POLICE = pygame.USEREVENT + 1
-    pygame.time.set_timer(SPAWN_POLICE, 3000) # Spawn every 3 seconds
+    pygame.time.set_timer(SPAWN_POLICE, 3000) # Spawn timer triggers every 3 seconds
+    
+    SCORE_TICK = pygame.USEREVENT + 2
+    pygame.time.set_timer(SCORE_TICK, 2000) # Add 10 points every 2 seconds
 
     running = True
     while running:
         keys = pygame.key.get_pressed()
+        
+        # Calculate Current Stage Requirements
+        total_cars_needed = stage * 10
+        cars_to_spawn_at_once = stage
 
         # Event Handling
         for event in pygame.event.get():
@@ -158,42 +183,92 @@ def main():
                 running = False
             
             if event.type == SPAWN_POLICE and not game_over:
-                # Spawn at edges
-                x = 0 if random.random() > 0.5 else WIDTH
-                y = random.randint(0, HEIGHT)
-                police_cars.append(Car(x, y, POLICE_COLOR, is_player=False))
+                # Only spawn if we haven't reached the limit for this stage
+                if cars_spawned_this_stage < total_cars_needed:
+                    for _ in range(cars_to_spawn_at_once):
+                        x = 0 if random.random() > 0.5 else WIDTH
+                        y = random.randint(0, HEIGHT)
+                        police_cars.append(Car(x, y, POLICE_COLOR, is_player=False))
+                        cars_spawned_this_stage += 1
+                        
+                        # Stop loop immediately if we hit the cap mid-spawn
+                        if cars_spawned_this_stage >= total_cars_needed:
+                            break
+                
+            if event.type == SCORE_TICK and not game_over:
+                score += 10 # Increase score over time
             
             if event.type == pygame.KEYDOWN and game_over:
                 if event.key == pygame.K_SPACE:
-                    # Restart Game
                     main()
                     return
 
         if not game_over:
-            # Update
-            score += 1
+            # --- Stage Progression Check ---
+            # If all cars for this stage have spawned, AND they have all been destroyed (0 left on screen)
+            if cars_spawned_this_stage >= total_cars_needed and len(police_cars) == 0:
+                stage += 1
+                cars_spawned_this_stage = 0
+                score += stage * 100  # Bonus score for clearing a stage
+                
+            # Update Player
             player.update(keys)
             
+            cars_to_remove = set()
+
+            # Update Police and check for player collision
             for cop in police_cars:
                 cop.update(keys, target=player)
                 if check_collision(player, cop):
                     game_over = True
 
-        # Draw
+            # Check for Police vs Police collision
+            for i in range(len(police_cars)):
+                for j in range(i + 1, len(police_cars)):
+                    if check_collision(police_cars[i], police_cars[j]):
+                        cars_to_remove.add(police_cars[i])
+                        cars_to_remove.add(police_cars[j])
+
+            # Blast the crashed cars and increase score
+            for crashed_car in cars_to_remove:
+                if crashed_car in police_cars:
+                    police_cars.remove(crashed_car)
+                    # Spawn explosion halfway between collisions roughly
+                    explosions.append(Explosion(crashed_car.x, crashed_car.y))
+            
+            # Award 50 points per pair destroyed
+            if len(cars_to_remove) > 0:
+                score += (len(cars_to_remove) // 2) * 50
+
+            # Update Explosions
+            for exp in explosions[:]:
+                exp.update()
+                if exp.life <= 0:
+                    explosions.remove(exp)
+
+        # Draw Frame
         screen.fill(BG_COLOR)
         
         player.draw(screen)
+        
         for cop in police_cars:
             cop.draw(screen)
+            
+        for exp in explosions:
+            exp.draw(screen)
 
         # UI
-        score_text = font.render(f"Score: {score // 60}", True, WHITE)
+        score_text = font.render(f"Score: {score}", True, WHITE)
+        stage_text = font.render(f"Stage: {stage}", True, YELLOW)
+        progress_text = font.render(f"Cars: {cars_spawned_this_stage}/{total_cars_needed}", True, (189, 195, 199))
         controls_text = font.render("Arrows: Drive & Drift", True, (189, 195, 199))
+        
         screen.blit(score_text, (20, 20))
-        screen.blit(controls_text, (20, 50))
+        screen.blit(stage_text, (20, 50))
+        screen.blit(progress_text, (20, 80))
+        screen.blit(controls_text, (20, 110))
 
         if game_over:
-            # Game Over Overlay
             overlay = pygame.Surface((WIDTH, HEIGHT))
             overlay.set_alpha(180)
             overlay.fill((0, 0, 0))
