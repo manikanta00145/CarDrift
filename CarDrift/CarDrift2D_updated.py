@@ -21,9 +21,10 @@ RED = (255, 0, 0)
 BLUE = (0, 0, 255)
 ORANGE = (255, 165, 0)
 
-# Police sprite file (keep it in the same folder as this Python file)
+# Car sprite files (keep them in the same folder as this Python file)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 POLICE_IMAGE_PATH = os.path.join(BASE_DIR, "police_car_sprite.png")
+PLAYER_IMAGE_PATH = os.path.join(BASE_DIR, "player_car_sprite.png")
 
 # Setup Display
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
@@ -32,21 +33,21 @@ clock = pygame.time.Clock()
 font = pygame.font.SysFont("sans-serif", 24)
 large_font = pygame.font.SysFont("sans-serif", 48)
 
+
 class Car:
     def __init__(self, x, y, color, is_player=False):
         self.x = x
         self.y = y
-        # Player stays small; police uses the supplied top-view sprite.
+
+        # Player uses the new red top-view sprite.
+        # Police uses the supplied police top-view sprite.
         if is_player:
-            self.width = 20
-            self.height = 40
-        else:
             self.width = 34
             self.height = 62
 
         self.color = color
         self.is_player = is_player
-        
+
         # Physics & Movement
         self.angle = 0.0  # Degrees (0 is pointing UP)
         self.vel_x = 0.0
@@ -57,23 +58,48 @@ class Car:
         self.friction = 0.96
         self.grip = 0.08  # Lower grip = more sliding/drifting
         self.turn_speed = 4.5  # Degrees per frame
-        
+
         # Create car image
         if self.is_player:
-            self.original_image = pygame.Surface(
-                (self.width, self.height), pygame.SRCALPHA
-            )
-            self.original_image.fill(self.color)
+            try:
+                # Load player top-view car image
+                player_image = pygame.image.load(
+                    PLAYER_IMAGE_PATH
+                ).convert_alpha()
 
-            # Player headlights
-            pygame.draw.rect(
-                self.original_image, YELLOW, (2, 0, 4, 4)
-            )
-            pygame.draw.rect(
-                self.original_image,
-                YELLOW,
-                (self.width - 6, 0, 4, 4)
-            )
+                # Resize player car
+                self.original_image = pygame.transform.smoothscale(
+                    player_image,
+                    (self.width, self.height)
+                )
+
+                # The supplied player image faces downward.
+                # Rotate 180 degrees so angle = 0 points UP.
+                self.original_image = pygame.transform.rotate(
+                    self.original_image,
+                    180
+                )
+
+            except (pygame.error, FileNotFoundError):
+                # Fallback if player image is missing
+                self.original_image = pygame.Surface(
+                    (self.width, self.height),
+                    pygame.SRCALPHA
+                )
+                self.original_image.fill(self.color)
+
+                # Player headlights
+                pygame.draw.rect(
+                    self.original_image,
+                    YELLOW,
+                    (2, 0, 4, 4)
+                )
+                pygame.draw.rect(
+                    self.original_image,
+                    YELLOW,
+                    (self.width - 6, 0, 4, 4)
+                )
+
         else:
             # Load the supplied top-view police car image.
             try:
@@ -85,10 +111,12 @@ class Car:
                     police_image,
                     (self.width, self.height)
                 )
+
             except (pygame.error, FileNotFoundError):
-                # Fallback if the image is missing.
+                # Fallback if police image is missing.
                 self.original_image = pygame.Surface(
-                    (self.width, self.height), pygame.SRCALPHA
+                    (self.width, self.height),
+                    pygame.SRCALPHA
                 )
                 self.original_image.fill(POLICE_COLOR)
 
@@ -98,12 +126,14 @@ class Car:
                     (2, 8, self.width // 2 - 2, 7),
                     border_radius=2
                 )
+
                 pygame.draw.rect(
                     self.original_image,
                     RED,
                     (self.width // 2, 8, self.width // 2 - 2, 7),
                     border_radius=2
                 )
+
                 pygame.draw.rect(
                     self.original_image,
                     WHITE,
@@ -121,27 +151,37 @@ class Car:
                 self.angle -= self.turn_speed
             if keys[pygame.K_RIGHT]:
                 self.angle += self.turn_speed
+
         elif target:
             # Police AI
             dx = target.x - self.x
             dy = target.y - self.y
-            
+
             # Calculate angle to player
             target_angle = math.degrees(math.atan2(dy, dx)) + 90
-            
+
             # Smooth rotation towards target
             angle_diff = (target_angle - self.angle) % 360
             if angle_diff > 180:
                 angle_diff -= 360
-                
-            turn_amount = min(abs(angle_diff), self.turn_speed * 0.8)
-            self.angle += math.copysign(turn_amount, angle_diff)
-            
+
+            turn_amount = min(
+                abs(angle_diff),
+                self.turn_speed * 0.8
+            )
+            self.angle += math.copysign(
+                turn_amount,
+                angle_diff
+            )
+
             # Constant acceleration for police
             self.speed += self.acceleration * 0.8
 
         # Cap speed
-        self.speed = max(-self.max_speed / 2, min(self.speed, self.max_speed))
+        self.speed = max(
+            -self.max_speed / 2,
+            min(self.speed, self.max_speed)
+        )
 
         # Forward vectors based on angle
         rad_angle = math.radians(self.angle)
@@ -152,11 +192,20 @@ class Car:
         target_vel_x = forward_x * self.speed
         target_vel_y = forward_y * self.speed
 
-        self.vel_x += (target_vel_x - self.vel_x) * self.grip
-        self.vel_y += (target_vel_y - self.vel_y) * self.grip
+        self.vel_x += (
+            target_vel_x - self.vel_x
+        ) * self.grip
+
+        self.vel_y += (
+            target_vel_y - self.vel_y
+        ) * self.grip
 
         # Apply friction if no gas is pressed (Player only)
-        if self.is_player and not keys[pygame.K_UP] and not keys[pygame.K_DOWN]:
+        if (
+            self.is_player
+            and not keys[pygame.K_UP]
+            and not keys[pygame.K_DOWN]
+        ):
             self.speed *= self.friction
             self.vel_x *= self.friction
             self.vel_y *= self.friction
@@ -166,16 +215,25 @@ class Car:
         self.y += self.vel_y
 
         # Screen Wrap
-        if self.x > WIDTH: self.x = 0
-        if self.x < 0: self.x = WIDTH
-        if self.y > HEIGHT: self.y = 0
-        if self.y < 0: self.y = HEIGHT
+        if self.x > WIDTH:
+            self.x = 0
+        if self.x < 0:
+            self.x = WIDTH
+        if self.y > HEIGHT:
+            self.y = 0
+        if self.y < 0:
+            self.y = HEIGHT
 
     def draw(self, surface):
-        # The new police image already contains its red/blue light bar.
-        rotated_image = pygame.transform.rotate(self.original_image, -self.angle)
-        new_rect = rotated_image.get_rect(center=(self.x, self.y))
+        rotated_image = pygame.transform.rotate(
+            self.original_image,
+            -self.angle
+        )
+        new_rect = rotated_image.get_rect(
+            center=(self.x, self.y)
+        )
         surface.blit(rotated_image, new_rect.topleft)
+
 
 # Visual Effect for destroyed police cars
 class Explosion:
@@ -184,7 +242,7 @@ class Explosion:
         self.y = y
         self.radius = 5
         self.max_radius = 50
-        self.life = 255  # Alpha value for fading out
+        self.life = 255
 
     def update(self):
         self.radius += 3
@@ -192,22 +250,47 @@ class Explosion:
 
     def draw(self, surface):
         if self.life > 0:
-            # Create a transparent surface for the explosion circle
-            s = pygame.Surface((self.max_radius * 2, self.max_radius * 2), pygame.SRCALPHA)
-            pygame.draw.circle(s, (*ORANGE, max(0, self.life)), (self.max_radius, self.max_radius), self.radius)
-            surface.blit(s, (self.x - self.max_radius, self.y - self.max_radius))
+            s = pygame.Surface(
+                (self.max_radius * 2, self.max_radius * 2),
+                pygame.SRCALPHA
+            )
+            pygame.draw.circle(
+                s,
+                (*ORANGE, max(0, self.life)),
+                (self.max_radius, self.max_radius),
+                self.radius
+            )
+            surface.blit(
+                s,
+                (
+                    self.x - self.max_radius,
+                    self.y - self.max_radius
+                )
+            )
+
 
 def check_collision(car1, car2):
     dx = car1.x - car2.x
     dy = car1.y - car2.y
     distance = math.hypot(dx, dy)
-    return distance < (car1.width / 2 + car2.width / 2 + 10)
+    return distance < (
+        car1.width / 2 +
+        car2.width / 2 +
+        10
+    )
+
 
 def main():
-    player = Car(WIDTH // 2, HEIGHT // 2, PLAYER_COLOR, is_player=True)
+    player = Car(
+        WIDTH // 2,
+        HEIGHT // 2,
+        PLAYER_COLOR,
+        is_player=True
+    )
+
     police_cars = []
     explosions = []
-    
+
     # Stage & Score Variables
     score = 0
     stage = 1
@@ -216,15 +299,16 @@ def main():
 
     # Timers
     SPAWN_POLICE = pygame.USEREVENT + 1
-    pygame.time.set_timer(SPAWN_POLICE, 3000) # Spawn timer triggers every 3 seconds
-    
+    pygame.time.set_timer(SPAWN_POLICE, 3000)
+
     SCORE_TICK = pygame.USEREVENT + 2
-    pygame.time.set_timer(SCORE_TICK, 2000) # Add 10 points every 2 seconds
+    pygame.time.set_timer(SCORE_TICK, 2000)
 
     running = True
+
     while running:
         keys = pygame.key.get_pressed()
-        
+
         # Calculate Current Stage Requirements
         total_cars_needed = stage * 10
         cars_to_spawn_at_once = stage
@@ -233,51 +317,67 @@ def main():
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-            
+
             if event.type == SPAWN_POLICE and not game_over:
-                # Only spawn if we haven't reached the limit for this stage
                 if cars_spawned_this_stage < total_cars_needed:
                     for _ in range(cars_to_spawn_at_once):
                         x = 0 if random.random() > 0.5 else WIDTH
                         y = random.randint(0, HEIGHT)
-                        police_cars.append(Car(x, y, POLICE_COLOR, is_player=False))
+
+                        police_cars.append(
+                            Car(
+                                x,
+                                y,
+                                POLICE_COLOR,
+                                is_player=False
+                            )
+                        )
+
                         cars_spawned_this_stage += 1
-                        
-                        # Stop loop immediately if we hit the cap mid-spawn
-                        if cars_spawned_this_stage >= total_cars_needed:
+
+                        if (
+                            cars_spawned_this_stage
+                            >= total_cars_needed
+                        ):
                             break
-                
+
             if event.type == SCORE_TICK and not game_over:
-                score += 10 # Increase score over time
-            
+                score += 10
+
             if event.type == pygame.KEYDOWN and game_over:
                 if event.key == pygame.K_SPACE:
                     main()
                     return
 
         if not game_over:
-            # --- Stage Progression Check ---
-            # If all cars for this stage have spawned, AND they have all been destroyed (0 left on screen)
-            if cars_spawned_this_stage >= total_cars_needed and len(police_cars) == 0:
+            # Stage Progression Check
+            if (
+                cars_spawned_this_stage >= total_cars_needed
+                and len(police_cars) == 0
+            ):
                 stage += 1
                 cars_spawned_this_stage = 0
-                score += stage * 100  # Bonus score for clearing a stage
-                
+                score += stage * 100
+
             # Update Player
             player.update(keys)
-            
+
             cars_to_remove = set()
 
             # Update Police and check for player collision
             for cop in police_cars:
                 cop.update(keys, target=player)
+
                 if check_collision(player, cop):
                     game_over = True
 
             # Check for Police vs Police collision
             for i in range(len(police_cars)):
                 for j in range(i + 1, len(police_cars)):
-                    if check_collision(police_cars[i], police_cars[j]):
+                    if check_collision(
+                        police_cars[i],
+                        police_cars[j]
+                    ):
                         cars_to_remove.add(police_cars[i])
                         cars_to_remove.add(police_cars[j])
 
@@ -285,9 +385,13 @@ def main():
             for crashed_car in cars_to_remove:
                 if crashed_car in police_cars:
                     police_cars.remove(crashed_car)
-                    # Spawn explosion halfway between collisions roughly
-                    explosions.append(Explosion(crashed_car.x, crashed_car.y))
-            
+                    explosions.append(
+                        Explosion(
+                            crashed_car.x,
+                            crashed_car.y
+                        )
+                    )
+
             # Award 50 points per pair destroyed
             if len(cars_to_remove) > 0:
                 score += (len(cars_to_remove) // 2) * 50
@@ -295,26 +399,46 @@ def main():
             # Update Explosions
             for exp in explosions[:]:
                 exp.update()
+
                 if exp.life <= 0:
                     explosions.remove(exp)
 
         # Draw Frame
         screen.fill(BG_COLOR)
-        
+
         player.draw(screen)
-        
+
         for cop in police_cars:
             cop.draw(screen)
-            
+
         for exp in explosions:
             exp.draw(screen)
 
         # UI
-        score_text = font.render(f"Score: {score}", True, WHITE)
-        stage_text = font.render(f"Stage: {stage}", True, YELLOW)
-        progress_text = font.render(f"Cars: {cars_spawned_this_stage}/{total_cars_needed}", True, (189, 195, 199))
-        controls_text = font.render("Arrows: Drive & Drift", True, (189, 195, 199))
-        
+        score_text = font.render(
+            f"Score: {score}",
+            True,
+            WHITE
+        )
+
+        stage_text = font.render(
+            f"Stage: {stage}",
+            True,
+            YELLOW
+        )
+
+        progress_text = font.render(
+            f"Cars: {cars_spawned_this_stage}/{total_cars_needed}",
+            True,
+            (189, 195, 199)
+        )
+
+        controls_text = font.render(
+            "Arrows: Drive & Drift",
+            True,
+            (189, 195, 199)
+        )
+
         screen.blit(score_text, (20, 20))
         screen.blit(stage_text, (20, 50))
         screen.blit(progress_text, (20, 80))
@@ -325,18 +449,43 @@ def main():
             overlay.set_alpha(180)
             overlay.fill((0, 0, 0))
             screen.blit(overlay, (0, 0))
-            
-            go_text = large_font.render("GAME OVER!", True, WHITE)
-            restart_text = font.render("Press SPACE to Restart", True, WHITE)
-            
-            screen.blit(go_text, (WIDTH // 2 - go_text.get_width() // 2, HEIGHT // 2 - 40))
-            screen.blit(restart_text, (WIDTH // 2 - restart_text.get_width() // 2, HEIGHT // 2 + 20))
+
+            go_text = large_font.render(
+                "GAME OVER!",
+                True,
+                WHITE
+            )
+
+            restart_text = font.render(
+                "Press SPACE to Restart",
+                True,
+                WHITE
+            )
+
+            screen.blit(
+                go_text,
+                (
+                    WIDTH // 2 -
+                    go_text.get_width() // 2,
+                    HEIGHT // 2 - 40
+                )
+            )
+
+            screen.blit(
+                restart_text,
+                (
+                    WIDTH // 2 -
+                    restart_text.get_width() // 2,
+                    HEIGHT // 2 + 20
+                )
+            )
 
         pygame.display.flip()
         clock.tick(FPS)
 
     pygame.quit()
     sys.exit()
+
 
 if __name__ == "__main__":
     main()
